@@ -2,18 +2,20 @@ import os
 import sys
 import tempfile
 from typing import Any
-import yaml
 from pathlib import Path
+import json
+import yaml
+import xxhash
 
-FSR_FILE = 'fsr.yaml'
-FSR_EXT = f".{FSR_FILE}"
+FSR_FILE = '__fsr__.yaml'
+FSR_EXT = '.fsr.yaml'
 CONFIG_FILE = 'flexsrc.yaml'
 REPO_CACHE_DIR = 'repo_cache_dir'
 DATA_CACHE_DIR = 'data_cache_dir'
 CACHE_PATH = 'cache_path'
 OBJECT_LOADER = 'object_loader'
 OBJECT_LOADER_PATH = 'object_loader_path'
-DEFAULT_OBJECT_LOADER = 'fsr.py'
+DEFAULT_OBJECT_LOADER = '__fsr__.py'
 IS_LOCAL = 'is_local'
 PATH = 'path'
 FLEXSRC_CURRENT_ROOT_DIR = 'flexsrc_current_root_dir'
@@ -34,16 +36,23 @@ def get_file_contents(path):
     return res
 
 
-def get_yamlfile_contents(path):
-    contents = get_file_contents(path)
-    if contents is not None:
+def to_object_from_yaml(text):
+    if text is not None:
         try:
-            contents = yaml.safe_load(contents)
-            if isinstance(contents, dict):
-                return contents
+            obj = yaml.safe_load(text)
+            if isinstance(obj, dict):
+                return obj
         except Exception as e:
             print(e, file=sys.stderr)
     return {}
+
+
+def filter_dot_keys(obj):
+    res = {}
+    for k, v in obj.items():
+        if not k.startswith('.'):
+            res[k] = v
+    return res
 
 
 class FSIndirectObject(dict):
@@ -66,29 +75,39 @@ class FSParams(dict):
     def __init__(self, holder, obj):
         self.holder = holder
         self.initialized = False
-        self.loaded_default_repr = super().__repr__()
+        self.loaded_default = {}
         if len(obj) > 0:
             self.initialize()
         self.update(obj)
 
+    def get_changed(self):
+        changed = {}
+        for k, v in self.items():
+            if k in self.loaded_default:
+                if v != self.loaded_default[k]:
+                    changed[k] = v
+            else:
+                changed[k] = v
+        return changed
+
     def __str__(self) -> str:
         self.initialize()
-        return super().__repr__() if self.__len__() > 0 else '{}'
+        return super().__repr__()
 
     def __repr__(self) -> str:
-        repr = super().__repr__()
-        return repr if self.__len__() > 0\
-                       and self.loaded_default_repr != repr else ''
+        changed = filter_dot_keys(self.get_changed())
+        return '' if len(changed) <= 0 else repr(changed)
 
     def __call__(self):
-        print(str(self))
+        print(json.dumps(self, indent=2))
         return self
 
     def initialize(self):
         if not self.initialized:
             self.initialized = True
             self.holder.load_params(self)
-            self.loaded_default_repr = super().__repr__()
+            self.loaded_default.clear()
+            self.loaded_default.update(self)
 
 
 class FlexSrc(FSIndirectObject):
@@ -98,11 +117,11 @@ class FlexSrc(FSIndirectObject):
         self.target = target
         self.forced_objects_func = None
         self.target_name = target
+        self.fsr_hash = ''
         if callable(target):
             self.target = '.'
             self.forced_objects_func = target.__name__
-            self.target_name = f"{globals()[FLEXSRC_CURRENT_TARGET_NAME]}\
-                                 .{target.__name__}"
+            self.target_name = f"{globals()[FLEXSRC_CURRENT_TARGET_NAME]}.{target.__name__}"
         if root_dir is None:
             if FLEXSRC_CURRENT_ROOT_DIR in globals():
                 root_dir = globals()[FLEXSRC_CURRENT_ROOT_DIR]
@@ -126,16 +145,23 @@ class FlexSrc(FSIndirectObject):
 
     def __str__(self) -> str:
         self.load()
-        return f"{self.__class__.__name__}\
-                 ({self.target_name}{repr(self.params)})\
-                 : {super().__repr__()}"
+        return f"{self.__class__.__name__}({self.target_name}{repr(self.params)}): {super().__repr__()}"
 
     def __repr__(self) -> str:
-        return f"{self.__class__.__name__}\
-                 ({self.target_name}{repr(self.params)})"
+        return f"{self.__class__.__name__}({self.target_name}{repr(self.params)})"
 
     def __call__(self):
-        print(str(self))
+        self.load()
+        print(repr(self))
+        is_first = True
+        print('{', end='')
+        for k, v in self.items():
+            if is_first:
+                is_first = False
+                print(f"\n  \"{k}\": {repr(v)}", end='')
+            else:
+                print(f",\n  \"{k}\": {repr(v)}", end='')
+        print('\n}')
         return self
 
     def __getitem__(self, __key: Any) -> Any:
@@ -143,14 +169,14 @@ class FlexSrc(FSIndirectObject):
         return super().__getitem__(__key)
 
     def try_load_configs(self):
-        self.config.update(
-          get_yamlfile_contents(
-            Path(os.path.expanduser('~')) / ('.' + CONFIG_FILE)))
-        self.config.update(
-          get_yamlfile_contents(
-            Path(os.path.expanduser('~')) / CONFIG_FILE))
-        self.config.update(get_yamlfile_contents('.' + CONFIG_FILE))
-        self.config.update(get_yamlfile_contents(CONFIG_FILE))
+        self.config.update(to_object_from_yaml(get_file_contents(
+          Path(os.path.expanduser('~')) / ('.' + CONFIG_FILE))))
+        self.config.update(to_object_from_yaml(get_file_contents(
+          Path(os.path.expanduser('~')) / CONFIG_FILE)))
+        self.config.update(to_object_from_yaml(
+          get_file_contents('.' + CONFIG_FILE)))
+        self.config.update(to_object_from_yaml(
+          get_file_contents(CONFIG_FILE)))
 
     def prepare_cache_dir(self):
         if self.config[REPO_CACHE_DIR] is None:
@@ -165,16 +191,19 @@ class FlexSrc(FSIndirectObject):
         os.makedirs(self.config[DATA_CACHE_DIR], exist_ok=True)
 
     def try_load_fsr_yaml(self):
+        fsr_yaml = '{}'
         if os.path.isdir(Path(self.root_dir) / self.target)\
            and os.path.isfile(Path(self.root_dir) / self.target / FSR_FILE):
-            self.config.update(
-              get_yamlfile_contents(
-                Path(self.root_dir) / self.target / FSR_FILE))
+            fsr_yaml = get_file_contents(
+                         Path(self.root_dir) / self.target / FSR_FILE)
             self.config[PATH] = Path(self.root_dir) / self.target
         elif os.path.isfile(Path(self.root_dir) / (self.target + FSR_EXT)):
-            self.config.update(get_yamlfile_contents(self.target + FSR_EXT))
+            fsr_yaml = get_file_contents(self.target + FSR_EXT)
             self.config[PATH] = Path(self.root_dir)
-        self.config[CACHE_PATH] = Path('local') / self.target
+        self.fsr_hash = xxhash.xxh32(fsr_yaml).hexdigest()
+        self.config.update(to_object_from_yaml(fsr_yaml))
+        self.config[CACHE_PATH] =\
+            Path('local') / f"{self.target}-{self.fsr_hash}"
         self.config[IS_LOCAL] = True
 
     def arrenge_configs(self):
