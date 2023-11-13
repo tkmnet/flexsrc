@@ -3,7 +3,7 @@ from setuptools import setup
 
 setup(
     name='flexsrc',
-    version='0.0.3',
+    version='0.0.4',
     description='',
     author='tkms',
     author_email='tkmnet@users.noreply.github.com',
