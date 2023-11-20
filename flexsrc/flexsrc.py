@@ -22,6 +22,7 @@ FLEXSRC_CURRENT_ROOT_DIR = 'flexsrc_current_root_dir'
 FLEXSRC_CURRENT_TARGET_NAME = 'flexsrc_current_target_name'
 WORK_DIR = 'work_dir'
 PARAMS = 'params'
+CONFIGS = 'configs'
 DEFAULT_PARAMS = 'default_params'
 OBJECTS_FUNC = 'objects_func'
 DEFAULT_OBJECTS_FUNC = 'objects'
@@ -64,7 +65,9 @@ class FSIndirectObject(dict):
 
     def __getitem__(self, __key: Any) -> Any:
         obj = super().__getitem__(__key)
-        if isinstance(obj, FlexSrc):
+        if isinstance(obj, FlexSrcLeaf):
+            return obj.get_body()
+        elif isinstance(obj, FlexSrc):
             return obj
         elif isinstance(obj, dict):
             return FSIndirectObject(obj)
@@ -131,7 +134,7 @@ class FlexSrc(FSIndirectObject):
         self.root_dir = root_dir
         self.config_loaded = False
         self.loaded_params_str = None
-        self.config = {
+        self.configs = {
             REPO_CACHE_DIR: None,
             DATA_CACHE_DIR: None,
             OBJECT_LOADER: DEFAULT_OBJECT_LOADER,
@@ -169,26 +172,26 @@ class FlexSrc(FSIndirectObject):
         return super().__getitem__(__key)
 
     def try_load_configs(self):
-        self.config.update(to_object_from_yaml(get_file_contents(
+        self.configs.update(to_object_from_yaml(get_file_contents(
           Path(os.path.expanduser('~')) / ('.' + CONFIG_FILE))))
-        self.config.update(to_object_from_yaml(get_file_contents(
+        self.configs.update(to_object_from_yaml(get_file_contents(
           Path(os.path.expanduser('~')) / CONFIG_FILE)))
-        self.config.update(to_object_from_yaml(
+        self.configs.update(to_object_from_yaml(
           get_file_contents('.' + CONFIG_FILE)))
-        self.config.update(to_object_from_yaml(
+        self.configs.update(to_object_from_yaml(
           get_file_contents(CONFIG_FILE)))
 
     def prepare_cache_dir(self):
-        if self.config[REPO_CACHE_DIR] is None:
+        if self.configs[REPO_CACHE_DIR] is None:
             with tempfile.TemporaryDirectory() as d:
-                self.config[REPO_CACHE_DIR] =\
+                self.configs[REPO_CACHE_DIR] =\
                   Path(d).parent / self.__class__.__name__ / 'repo'
-        if self.config[DATA_CACHE_DIR] is None:
+        if self.configs[DATA_CACHE_DIR] is None:
             with tempfile.TemporaryDirectory() as d:
-                self.config[DATA_CACHE_DIR] =\
+                self.configs[DATA_CACHE_DIR] =\
                   Path(d).parent / self.__class__.__name__ / 'data'
-        os.makedirs(self.config[REPO_CACHE_DIR], exist_ok=True)
-        os.makedirs(self.config[DATA_CACHE_DIR], exist_ok=True)
+        os.makedirs(self.configs[REPO_CACHE_DIR], exist_ok=True)
+        os.makedirs(self.configs[DATA_CACHE_DIR], exist_ok=True)
 
     def try_load_fsr_yaml(self):
         fsr_yaml = '{}'
@@ -196,18 +199,18 @@ class FlexSrc(FSIndirectObject):
            and os.path.isfile(Path(self.root_dir) / self.target / FSR_FILE):
             fsr_yaml = get_file_contents(
                          Path(self.root_dir) / self.target / FSR_FILE)
-            self.config[PATH] = Path(self.root_dir) / self.target
+            self.configs[PATH] = Path(self.root_dir) / self.target
         elif os.path.isfile(Path(self.root_dir) / (self.target + FSR_EXT)):
             fsr_yaml = get_file_contents(self.target + FSR_EXT)
-            self.config[PATH] = Path(self.root_dir)
+            self.configs[PATH] = Path(self.root_dir)
         self.fsr_hash = xxhash.xxh32(fsr_yaml).hexdigest()
-        self.config.update(to_object_from_yaml(fsr_yaml))
-        self.config[CACHE_PATH] =\
+        self.configs.update(to_object_from_yaml(fsr_yaml))
+        self.configs[CACHE_PATH] =\
             Path('local') / f"{self.target}-{self.fsr_hash}"
-        self.config[IS_LOCAL] = True
+        self.configs[IS_LOCAL] = True
 
     def arrenge_configs(self):
-        c = self.config
+        c = self.configs
         c[WORK_DIR] = c[DATA_CACHE_DIR] / c[CACHE_PATH]
         c[OBJECT_LOADER_PATH] = c[PATH] / c[OBJECT_LOADER]
         if self.forced_objects_func is not None:
@@ -223,11 +226,15 @@ class FlexSrc(FSIndirectObject):
 
     def load_params(self, storage):
         self.load_config()
-        storage.update(self.config[DEFAULT_PARAMS])
+        storage.update(self.configs[DEFAULT_PARAMS])
+
+    def clear(self) -> None:
+        self.loaded_params_str = None
+        return super().clear()
 
     def info(self):
         self.load_config()
-        return self.config[INFO]
+        return self.configs[INFO]
 
     def load(self):
         params_str = str(self.params)
@@ -236,25 +243,26 @@ class FlexSrc(FSIndirectObject):
             self.load_config()
             # BEGIN: chdir
             cwd = os.getcwd()
-            os.makedirs(self.config[WORK_DIR], exist_ok=True)
-            os.chdir(self.config[WORK_DIR])
+            os.makedirs(self.configs[WORK_DIR], exist_ok=True)
+            os.chdir(self.configs[WORK_DIR])
             # BEGIN: arrange globals
-            globals()[FLEXSRC_CURRENT_ROOT_DIR] = self.config[PATH]
+            globals()[FLEXSRC_CURRENT_ROOT_DIR] = self.configs[PATH]
             globals()[FLEXSRC_CURRENT_TARGET_NAME] = self.target_name
             # BEGIN: reflect objects
             # print("### EVAL ### " + self.target_name)
-            sys.path.append(self.config[PATH])
+            sys.path.append(self.configs[PATH])
             code = compile(
                      get_file_contents(
-                       self.config[OBJECT_LOADER_PATH]),
-                     self.config[OBJECT_LOADER_PATH], 'exec')
+                       self.configs[OBJECT_LOADER_PATH]),
+                     self.configs[OBJECT_LOADER_PATH], 'exec')
             globals_storage = {}
             globals_storage.update(globals())
             locals_storage = {}
             exec(code, globals_storage, locals_storage)
             globals_storage.update(locals_storage)
             globals_storage[PARAMS] = self.params
-            objects = eval(f"{self.config[OBJECTS_FUNC]}()",
+            globals_storage[CONFIGS] = self.configs
+            objects = eval(f"{self.configs[OBJECTS_FUNC]}()",
                            globals_storage, locals_storage)
             self.clear()
             self.update(objects)
@@ -279,3 +287,18 @@ class FlexSrc(FSIndirectObject):
             return config[DEFAULT_PARAMS]
         else:
             return {}
+
+class FlexSrcLeaf(FlexSrc):
+    def __init__(self, target, params={}):
+        super().__init__(target, params)
+        self.body = None
+
+    def clear(self):
+        self.body = None
+
+    def update(self, body):
+        self.body = body
+    
+    def get_body(self):
+        super().load()
+        return self.body
