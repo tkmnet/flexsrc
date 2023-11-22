@@ -23,5 +23,5 @@ setup(
     author_email='tkmnet@users.noreply.github.com',
     url='https://github.com/tkmnet/flexsrc',
     packages=find_packages(),
-    install_requires=['pyyaml', 'xxhash', 'pandas', 'ulid-py'],
+    install_requires=['pyyaml', 'xxhash', 'pandas', 'cfcf'],
 )

@@ -7,6 +7,7 @@ import json
 import yaml
 import xxhash
 
+FLEXSRC = 'FlexSrc'
 FSR_FILE = '__fsr__.yaml'
 FSR_EXT = '.fsr.yaml'
 CONFIG_FILE = 'flexsrc.yaml'
@@ -16,6 +17,7 @@ CACHE_PATH = 'cache_path'
 OBJECT_LOADER = 'object_loader'
 OBJECT_LOADER_PATH = 'object_loader_path'
 DEFAULT_OBJECT_LOADER = '__fsr__.py'
+LOCAL = 'local'
 IS_LOCAL = 'is_local'
 PATH = 'path'
 FLEXSRC_CURRENT_ROOT_DIR = 'flexsrc_current_root_dir'
@@ -27,6 +29,9 @@ DEFAULT_PARAMS = 'default_params'
 OBJECTS_FUNC = 'objects_func'
 DEFAULT_OBJECTS_FUNC = 'objects'
 INFO = 'info'
+DATA = 'data'
+REPO = 'repo'
+ID = 'id'
 
 
 def get_file_contents(path):
@@ -120,7 +125,7 @@ class FlexSrc(FSIndirectObject):
         self.target = target
         self.forced_objects_func = None
         self.target_name = target
-        self.fsr_hash = ''
+        self.fsr_id = ''
         if callable(target):
             self.target = '.'
             self.forced_objects_func = target.__name__
@@ -185,11 +190,11 @@ class FlexSrc(FSIndirectObject):
         if self.configs[REPO_CACHE_DIR] is None:
             with tempfile.TemporaryDirectory() as d:
                 self.configs[REPO_CACHE_DIR] =\
-                  Path(d).parent / self.__class__.__name__ / 'repo'
+                  Path(d).parent / FLEXSRC / REPO
         if self.configs[DATA_CACHE_DIR] is None:
             with tempfile.TemporaryDirectory() as d:
                 self.configs[DATA_CACHE_DIR] =\
-                  Path(d).parent / self.__class__.__name__ / 'data'
+                  Path(d).parent / FLEXSRC / DATA
         os.makedirs(self.configs[REPO_CACHE_DIR], exist_ok=True)
         os.makedirs(self.configs[DATA_CACHE_DIR], exist_ok=True)
 
@@ -203,10 +208,12 @@ class FlexSrc(FSIndirectObject):
         elif os.path.isfile(Path(self.root_dir) / (self.target + FSR_EXT)):
             fsr_yaml = get_file_contents(self.target + FSR_EXT)
             self.configs[PATH] = Path(self.root_dir)
-        self.fsr_hash = xxhash.xxh32(fsr_yaml).hexdigest()
         self.configs.update(to_object_from_yaml(fsr_yaml))
-        self.configs[CACHE_PATH] =\
-            Path('local') / f"{self.target}-{self.fsr_hash}"
+        if ID in self.configs:
+            self.fsr_id = self.configs[ID]
+        else:
+            self.fsr_id = xxhash.xxh32(fsr_yaml).hexdigest()
+        self.configs[CACHE_PATH] = Path(LOCAL) / f"{self.target}-{self.fsr_id}"
         self.configs[IS_LOCAL] = True
 
     def arrenge_configs(self):
@@ -239,8 +246,8 @@ class FlexSrc(FSIndirectObject):
     def load(self):
         params_str = str(self.params)
         if self.loaded_params_str != params_str:
-            self.loaded_params_str = params_str
             self.load_config()
+            self.loaded_params_str = params_str
             # BEGIN: chdir
             cwd = os.getcwd()
             os.makedirs(self.configs[WORK_DIR], exist_ok=True)
@@ -264,7 +271,7 @@ class FlexSrc(FSIndirectObject):
             globals_storage[CONFIGS] = self.configs
             objects = eval(f"{self.configs[OBJECTS_FUNC]}()",
                            globals_storage, locals_storage)
-            self.clear()
+            super().clear()
             self.update(objects)
             # END: reflect objects
             globals().pop(FLEXSRC_CURRENT_ROOT_DIR)
