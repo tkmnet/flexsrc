@@ -25,6 +25,7 @@ FLEXSRC_CURRENT_TARGET_NAME = 'flexsrc_current_target_name'
 WORK_DIR = 'work_dir'
 PARAMS = 'params'
 CONFIGS = 'configs'
+STORAGE = 'storage'
 DEFAULT_PARAMS = 'default_params'
 OBJECTS_FUNC = 'objects_func'
 DEFAULT_OBJECTS_FUNC = 'objects'
@@ -69,7 +70,12 @@ class FSIndirectObject(dict):
         self.clear()
 
     def __getitem__(self, __key: Any) -> Any:
-        obj = super().__getitem__(__key)
+        if isinstance(__key, list):
+            obj = self
+            for k in __key:
+                obj = obj[k]
+        else:
+            obj = super().__getitem__(__key)
         if isinstance(obj, FlexSrcLeaf):
             return obj.get_body()
         elif isinstance(obj, FlexSrc):
@@ -148,6 +154,7 @@ class FlexSrc(FSIndirectObject):
             INFO: None
         }
         self.params = FSParams(self, params)
+        self.storage = {}
         if pre_load:
             self.load()
 
@@ -175,6 +182,9 @@ class FlexSrc(FSIndirectObject):
     def __getitem__(self, __key: Any) -> Any:
         self.load()
         return super().__getitem__(__key)
+    
+    def __getattr__(self, __name: str) -> Any:
+        return self.__getitem__(__name)
 
     def try_load_configs(self):
         self.configs.update(to_object_from_yaml(get_file_contents(
@@ -237,6 +247,7 @@ class FlexSrc(FSIndirectObject):
 
     def clear(self) -> None:
         self.loaded_params_str = None
+        self.storage = {}
         return super().clear()
 
     def info(self):
@@ -269,6 +280,7 @@ class FlexSrc(FSIndirectObject):
             globals_storage.update(locals_storage)
             globals_storage[PARAMS] = self.params
             globals_storage[CONFIGS] = self.configs
+            globals_storage[STORAGE] = self.storage
             objects = eval(f"{self.configs[OBJECTS_FUNC]}()",
                            globals_storage, locals_storage)
             super().clear()
