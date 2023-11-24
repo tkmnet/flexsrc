@@ -223,7 +223,7 @@ class FlexSrc(FSIndirectObject):
             self.fsr_id = self.configs[ID]
         else:
             self.fsr_id = xxhash.xxh32(fsr_yaml).hexdigest()
-        self.configs[CACHE_PATH] = Path(LOCAL) / f"{self.target}-{self.fsr_id}"
+        self.configs[CACHE_PATH] = Path(LOCAL) / f"{self.target_name}-{self.fsr_id}"
         self.configs[IS_LOCAL] = True
 
     def arrenge_configs(self):
@@ -302,7 +302,7 @@ class FlexSrc(FSIndirectObject):
                          ).parent
                 path = parent / path
             config = {DEFAULT_PARAMS: {}}
-            config.update(get_yamlfile_contents(path))
+            config.update(to_object_from_yaml(get_file_contents(path)))
             return config[DEFAULT_PARAMS]
         else:
             return {}

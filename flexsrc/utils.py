@@ -1,4 +1,7 @@
+import os
 import requests
+import uuid
+import shutil
 
 class FlexSrcUtils:
     def download(url, dst):
@@ -8,3 +11,10 @@ class FlexSrcUtils:
                 if chunk:
                     f.write(chunk)
                     f.flush()
+    
+    def unarchive(url):
+        tmp_file = str(uuid.uuid4())
+        FlexSrcUtils.download(url, tmp_file)
+        shutil.unpack_archive(tmp_file, '.')
+        os.remove(tmp_file)
+        
