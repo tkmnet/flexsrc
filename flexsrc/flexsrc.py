@@ -83,6 +83,9 @@ class FSIndirectObject(dict):
         elif isinstance(obj, dict):
             return FSIndirectObject(obj)
         return obj
+    
+    def __getattr__(self, __name: str) -> Any:
+        return self.__getitem__(__name)
 
 
 class FSParams(dict):
@@ -165,6 +168,10 @@ class FlexSrc(FSIndirectObject):
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}({self.target_name}{repr(self.params)})"
 
+    def __getitem__(self, __key: Any) -> Any:
+        self.load()
+        return super().__getitem__(__key)
+
     def __call__(self):
         self.load()
         print(repr(self))
@@ -178,13 +185,6 @@ class FlexSrc(FSIndirectObject):
                 print(f",\n  \"{k}\": {repr(v)}", end='')
         print('\n}')
         return self
-
-    def __getitem__(self, __key: Any) -> Any:
-        self.load()
-        return super().__getitem__(__key)
-    
-    def __getattr__(self, __name: str) -> Any:
-        return self.__getitem__(__name)
 
     def try_load_configs(self):
         self.configs.update(to_object_from_yaml(get_file_contents(

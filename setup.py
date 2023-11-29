@@ -15,10 +15,17 @@ def load_description():
     return ''
 
 
+def load_long_description():
+    with open('README.md', 'r') as file:
+        return file.read()
+
+
 setup(
     name='flexsrc',
     version=flexsrc.__version__,
     description=load_description(),
+    long_description=load_long_description(),
+    long_description_content_type='text/markdown',  
     author='tkms',
     author_email='tkmnet@users.noreply.github.com',
     url='https://github.com/tkmnet/flexsrc',
