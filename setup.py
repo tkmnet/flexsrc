@@ -1,6 +1,13 @@
 from setuptools import find_packages
 from setuptools import setup
-import flexsrc
+
+
+def load_version(module_path):
+    for line in open(module_path + '/__init__.py', 'r').read().splitlines():
+        if line.startswith('__version__'):
+            delim = '"' if '"' in line else "'"
+            return line.split(delim)[1]
+    return '0.0.0'
 
 
 def load_description():
@@ -22,7 +29,7 @@ def load_long_description():
 
 setup(
     name='flexsrc',
-    version=flexsrc.__version__,
+    version=load_version('flexsrc'),
     description=load_description(),
     long_description=load_long_description(),
     long_description_content_type='text/markdown',  

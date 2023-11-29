@@ -4,4 +4,4 @@ from .utils import FlexSrcUtils
 from .filecontainer import FlexSrcFile
 
 
-__version__ = '0.1.2'
+__version__ = '0.1.3'
