@@ -5,8 +5,10 @@ from typing import Any
 from pathlib import Path
 import copy
 import json
+import shutil
 import yaml
 import xxhash
+import cfcf
 
 FLEXSRC = 'FlexSrc'
 FSR_FILE = '__flexsrc__.yaml'
@@ -35,6 +37,7 @@ INFO = 'info'
 DATA = 'data'
 REPO = 'repo'
 ID = 'id'
+REPO_CACHE = 'repo_cache'
 
 
 def get_file_contents(path):
@@ -144,7 +147,7 @@ class FlexSrc(FSIndirectObject):
         self.target = target
         self.forced_objects_func = None
         self.target_name = target
-        self.fsr_id = ''
+        self.flexsrc_id = ''
         if callable(target):
             self.target = '.'
             self.forced_objects_func = target.__name__
@@ -156,7 +159,8 @@ class FlexSrc(FSIndirectObject):
             else:
                 root_dir = os.getcwd()
         self.root_dir = root_dir
-        self.config_loaded = False
+        self.is_cached_repo = False
+        self.is_config_loaded = False
         self.loaded_params_str = None
         self.configs = {
             REPO_CACHE_DIR: None,
@@ -219,44 +223,77 @@ class FlexSrc(FSIndirectObject):
         os.makedirs(self.configs[REPO_CACHE_DIR], exist_ok=True)
         os.makedirs(self.configs[DATA_CACHE_DIR], exist_ok=True)
 
-    def try_load_fsr_yaml(self):
-        fsr_yaml = '{}'
-        if os.path.isdir(Path(self.root_dir) / self.target)\
-           and os.path.isfile(Path(self.root_dir) / self.target / FSR_FILE):
-            fsr_yaml = get_file_contents(
-                         Path(self.root_dir) / self.target / FSR_FILE)
+    def try_load_flexsrc_yaml(self):
+        flexsrc_yaml = '{}'
+        if cfcf.chdir_and_call(self.configs[REPO_CACHE_DIR],
+                               lambda: cfcf.exist(Path(self.root_dir) / self.target / FSR_FILE)):
+            self.is_cached_repo = True
+            self.flexsrc_yaml_path = Path(self.root_dir) / self.target / FSR_FILE
+            self.flexsrc_yaml_path = cfcf.chdir_and_call(self.configs[REPO_CACHE_DIR],
+                                                         lambda: cfcf.get_file(self.flexsrc_yaml_path, cfcf.copy, self.flexsrc_yaml_path))
+            self.configs[PATH] = Path(self.root_dir) / self.target
+        elif cfcf.chdir_and_call(self.configs[REPO_CACHE_DIR],
+                                 lambda: cfcf.exist(Path(self.root_dir) / (self.target + FSR_EXT))):
+            self.is_cached_repo = True
+            self.flexsrc_yaml_path = Path(self.root_dir) / (self.target + FSR_EXT)
+            self.flexsrc_yaml_path = cfcf.chdir_and_call(self.configs[REPO_CACHE_DIR],
+                                                         lambda: cfcf.get_file(self.flexsrc_yaml_path, cfcf.copy, self.flexsrc_yaml_path))
+            self.configs[PATH] = Path(self.root_dir)
+        elif os.path.isfile(Path(self.root_dir) / self.target / FSR_FILE):
+            self.flexsrc_yaml_path = Path(self.root_dir) / self.target / FSR_FILE
             self.configs[PATH] = Path(self.root_dir) / self.target
         elif os.path.isfile(Path(self.root_dir) / (self.target + FSR_EXT)):
-            fsr_yaml = get_file_contents(self.target + FSR_EXT)
+            self.flexsrc_yaml_path = Path(self.root_dir) / (self.target + FSR_EXT)
             self.configs[PATH] = Path(self.root_dir)
         else:
             raise InvalidFlexSrc(str(self.root_dir))
-        self.configs.update(to_object_from_yaml(fsr_yaml))
+        self.configs.update(to_object_from_yaml(get_file_contents(self.flexsrc_yaml_path)))
         if ID in self.configs:
-            self.fsr_id = self.configs[ID]
+            self.flexsrc_id = self.configs[ID]
         else:
-            self.fsr_id = xxhash.xxh32(fsr_yaml).hexdigest()
-        self.configs[CACHE_PATH] = Path(LOCAL) / f"{self.target_name}-{self.fsr_id}"
+            self.flexsrc_id = xxhash.xxh32(self.configs[OBJECT_LOADER]).hexdigest()
         self.configs[IS_LOCAL] = True
+        if self.configs[IS_LOCAL]:
+            self.configs[CACHE_PATH] = Path(LOCAL) / f"{self.target_name}-{self.flexsrc_id}"
+        else:
+            pass #
+        if not self.is_cached_repo and REPO_CACHE in self.configs and self.configs[REPO_CACHE]:
+            self.is_cached_repo = True
+            if self.configs[IS_LOCAL]:
+                self.flexsrc_yaml_path = cfcf.chdir_and_call(self.configs[REPO_CACHE_DIR],
+                                                             lambda: cfcf.get_file(self.flexsrc_yaml_path, cfcf.copy, self.flexsrc_yaml_path))
 
     def arrange_configs(self):
         c = self.configs
         c[WORK_DIR] = c[DATA_CACHE_DIR] / c[CACHE_PATH]
         c[OBJECT_LOADER_PATH] = c[PATH] / c[OBJECT_LOADER]
+        if self.is_cached_repo:
+            c[OBJECT_LOADER_PATH] = cfcf.chdir_and_call(self.configs[REPO_CACHE_DIR],
+                                                             lambda: cfcf.get_file(c[OBJECT_LOADER_PATH], cfcf.copy, c[OBJECT_LOADER_PATH]))
+
         if self.forced_objects_func is not None:
             c[OBJECTS_FUNC] = self.forced_objects_func
 
     def load_config(self):
-        if not self.config_loaded:
-            self.config_loaded = True
+        if not self.is_config_loaded:
+            self.is_config_loaded = True
             self.try_load_configs()
             self.prepare_cache_dir()
-            self.try_load_fsr_yaml()
+            self.try_load_flexsrc_yaml()
             self.arrange_configs()
 
     def load_params(self, storage):
         self.load_config()
         storage.update(self.configs[DEFAULT_PARAMS])
+    
+    def clean_cache(self):
+        if os.path.isdir(self.configs[REPO_CACHE_DIR]):
+            shutil.rmtree(self.configs[REPO_CACHE_DIR])
+        if os.path.isdir(self.configs[DATA_CACHE_DIR]):
+            shutil.rmtree(self.configs[DATA_CACHE_DIR])
+        os.makedirs(self.configs[REPO_CACHE_DIR], exist_ok=True)
+        os.makedirs(self.configs[DATA_CACHE_DIR], exist_ok=True)
+        self.clear()
 
     def clear(self) -> None:
         self.loaded_params_str = None
@@ -321,6 +358,7 @@ class FlexSrc(FSIndirectObject):
             return config[DEFAULT_PARAMS]
         else:
             return {}
+
 
 class FlexSrcLeaf(FlexSrc):
     def __init__(self, target, params={}):
