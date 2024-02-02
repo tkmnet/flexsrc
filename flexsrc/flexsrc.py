@@ -43,7 +43,7 @@ REPO_CACHE = 'repo_cache'
 def get_file_contents(path):
     res = None
     if os.path.isfile(path):
-        with open(path, 'r') as file:
+        with open(path, 'r', encoding='utf-8') as file:
             res = file.read()
     return res
 
