@@ -1,5 +1,6 @@
 import os
 import sys
+import inspect
 import tempfile
 from typing import Any
 from pathlib import Path
@@ -38,6 +39,8 @@ DATA = 'data'
 REPO = 'repo'
 ID = 'id'
 REPO_CACHE = 'repo_cache'
+FLEXSRC_HOME = 'FLEXSRC_HOME'
+DUNDER_FLEXSRC_HOME = '__flexsrc_home__'
 
 
 def get_file_contents(path):
@@ -156,7 +159,11 @@ class FlexSrc(FSIndirectObject):
             if FLEXSRC_CURRENT_ROOT_DIR in globals():
                 root_dir = globals()[FLEXSRC_CURRENT_ROOT_DIR]
                 pre_load = False
-            else:
+            if root_dir is None:
+                root_dir = os.getenv(FLEXSRC_HOME)
+            if root_dir is None:
+                root_dir = FlexSrc.try_get_flexsrc_home()
+            if root_dir is None:
                 root_dir = os.getcwd()
         self.root_dir = root_dir
         self.is_cached_repo = False
@@ -358,6 +365,18 @@ class FlexSrc(FSIndirectObject):
             return config[DEFAULT_PARAMS]
         else:
             return {}
+
+    def try_get_flexsrc_home():
+        current = Path(inspect.currentframe().f_back.f_back.f_code.co_filename).parent
+        if str(current) == '.':
+            current = Path(os.getcwd())
+        prev = None
+        while prev != current:
+            if DUNDER_FLEXSRC_HOME in os.listdir(current):
+                return current
+            prev = current
+            current = current.parent
+        return None
 
 
 class FlexSrcLeaf(FlexSrc):
